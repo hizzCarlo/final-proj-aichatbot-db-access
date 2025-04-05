@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { fade, slide } from 'svelte/transition';
+    import { Chart } from 'chart.js/auto';
 
     interface Student {
         id: number;
@@ -18,6 +19,12 @@
     let showChatbot = false;
     let summary = '';
     let editingStudent: Student | null = null;
+    let showSummaryModal = false;
+    let isSummarizing = false;
+    let summaryData: any = null;
+    let predictionChart: Chart | null = null;
+    let performanceChart: Chart | null = null;
+    let isInitialLoad = true;
     let formData = {
         firstName: '',
         lastName: '',
@@ -30,6 +37,16 @@
     };
 
     const genderOptions = ['Male', 'Female'];
+
+    interface SummaryData {
+        overview: string;
+        predictions: {
+            enrollmentTrend: number[];
+            performanceTrend: number[];
+            labels: string[];
+        };
+        aiInsights: string;
+    }
 
     async function loadStudents() {
         const response = await fetch('/api/students');
@@ -113,6 +130,184 @@
         }
     }
 
+    // Watch for modal visibility changes
+    $: if (showSummaryModal && summaryData) {
+        // Use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+            createPredictionCharts();
+        });
+    }
+
+    async function generateSummary() {
+        if (isSummarizing) return;
+        
+        // Show modal immediately with existing data or loading state
+        showSummaryModal = true;
+        
+        // If we already have data or are already loading, don't fetch again
+        if (summaryData || isSummarizing) return;
+        
+        isSummarizing = true;
+        isInitialLoad = false;
+
+        try {
+            // Get predefined summary
+            const summaryResponse = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    type: 'summary',
+                    question: 'Give me a complete summary of all student data'
+                })
+            });
+            const summaryResult = await summaryResponse.json();
+
+            // Get AI insights
+            const insightResponse = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    question: 'Based on the current data, provide insights about future enrollment trends, potential areas of improvement, and recommendations for academic performance enhancement.'
+                })
+            });
+            const insightResult = await insightResponse.json();
+
+            // Generate mock prediction data (in a real app, this would come from a ML model)
+            const predictions = {
+                enrollmentTrend: [65, 72, 78, 82, 88, 92],
+                performanceTrend: [75, 78, 80, 82, 85, 87],
+                labels: ['Current', '+1 Month', '+2 Months', '+3 Months', '+4 Months', '+5 Months']
+            };
+
+            summaryData = {
+                overview: summaryResult.response,
+                predictions,
+                aiInsights: insightResult.response
+            };
+
+        } catch (error) {
+            console.error('Error generating summary:', error);
+        } finally {
+            isSummarizing = false;
+        }
+    }
+
+    function clearSummary() {
+        summaryData = null;
+        if (predictionChart) {
+            predictionChart.destroy();
+            predictionChart = null;
+        }
+        if (performanceChart) {
+            performanceChart.destroy();
+            performanceChart = null;
+        }
+    }
+
+    function createPredictionCharts() {
+        // Destroy existing charts first
+        if (predictionChart) {
+            predictionChart.destroy();
+            predictionChart = null;
+        }
+        if (performanceChart) {
+            performanceChart.destroy();
+            performanceChart = null;
+        }
+
+        if (!summaryData) return;
+
+        const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color');
+        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary');
+        const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color');
+
+        // Enrollment Prediction Chart
+        const enrollmentCtx = document.getElementById('enrollmentPredictionChart') as HTMLCanvasElement;
+        if (!enrollmentCtx) return; // Exit if canvas element isn't ready
+
+        predictionChart = new Chart(enrollmentCtx, {
+            type: 'line',
+            data: {
+                labels: summaryData.predictions.labels,
+                datasets: [{
+                    label: 'Predicted Enrollment',
+                    data: summaryData.predictions.enrollmentTrend,
+                    borderColor: primaryColor,
+                    tension: 0.4,
+                    fill: true,
+                    backgroundColor: `${primaryColor}20`
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Enrollment Trend Prediction',
+                        color: textColor
+                    },
+                    legend: {
+                        labels: { color: textColor }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: borderColor },
+                        ticks: { color: textColor }
+                    },
+                    y: {
+                        grid: { color: borderColor },
+                        ticks: { color: textColor }
+                    }
+                }
+            }
+        });
+
+        // Performance Prediction Chart
+        const performanceCtx = document.getElementById('performancePredictionChart') as HTMLCanvasElement;
+        if (!performanceCtx) return; // Exit if canvas element isn't ready
+
+        performanceChart = new Chart(performanceCtx, {
+            type: 'line',
+            data: {
+                labels: summaryData.predictions.labels,
+                datasets: [{
+                    label: 'Predicted Average Performance',
+                    data: summaryData.predictions.performanceTrend,
+                    borderColor: primaryColor,
+                    tension: 0.4,
+                    fill: true,
+                    backgroundColor: `${primaryColor}20`
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Performance Trend Prediction',
+                        color: textColor
+                    },
+                    legend: {
+                        labels: { color: textColor }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: borderColor },
+                        ticks: { color: textColor }
+                    },
+                    y: {
+                        grid: { color: borderColor },
+                        ticks: { color: textColor }
+                    }
+                }
+            }
+        });
+    }
+
     onMount(loadStudents);
 </script>
 
@@ -142,6 +337,166 @@
         color: var(--primary-color, #6366f1);
         margin-bottom: 0.5rem;
     }
+
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .modal-container {
+        background: var(--card-background);
+        border-radius: 1rem;
+        width: 90%;
+        max-width: 1200px;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .modal-content {
+        padding: 1.5rem;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    .summary-section {
+        margin-bottom: 2rem;
+    }
+
+    .summary-section h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--primary-color);
+        margin-bottom: 1rem;
+    }
+
+    .markdown-content {
+        line-height: 1.6;
+    }
+
+    .markdown-content h4 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 1rem 0 0.5rem;
+    }
+
+    .markdown-content strong {
+        color: var(--primary-color);
+        font-weight: 600;
+    }
+
+    .charts-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .prediction-chart {
+        background: var(--background-color);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        height: 300px;
+    }
+
+    .loading-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem;
+        color: var(--text-secondary);
+        min-height: 300px;
+    }
+
+    .loading-spinner {
+        margin-bottom: 1rem;
+        color: var(--primary-color);
+    }
+
+    @keyframes bounce {
+        0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+
+    .loading-dots {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .loading-dot {
+        width: 0.75rem;
+        height: 0.75rem;
+        background-color: var(--primary-color);
+        border-radius: 50%;
+        animation: bounce 1.4s infinite ease-in-out both;
+    }
+
+    .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+    .loading-dot:nth-child(3) { animation-delay: 0s; }
+
+    .btn.loading {
+        opacity: 0.7;
+        cursor: not-allowed;
+        position: relative;
+        padding-right: 4rem;
+    }
+
+    .btn.loading .loading-dots {
+        position: absolute;
+        right: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        margin: 0;
+        gap: 0.25rem;
+    }
+
+    .btn.loading .loading-dot {
+        width: 0.5rem;
+        height: 0.5rem;
+    }
+
+    @media (max-width: 768px) {
+        .modal-container {
+            width: 95%;
+            max-height: 95vh;
+        }
+
+        .charts-container {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 
 <div class="container">
@@ -149,7 +504,88 @@
         <header class="student-header">
             <h1>Student Management</h1>
         </header>
+        <button 
+            class="btn btn-primary {isSummarizing ? 'loading' : ''}"
+            on:click={generateSummary}
+            disabled={isSummarizing}
+        >
+            <i class="fas fa-chart-bar"></i>
+            Summarize Data
+            {#if isSummarizing}
+                <div class="loading-dots">
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                </div>
+            {/if}
+        </button>
     </div>
+
+    <!-- Summary Modal -->
+    {#if showSummaryModal}
+        <div class="modal-overlay" transition:fade>
+            <div class="modal-container" transition:slide>
+                <div class="modal-header">
+                    <h2>Data Analysis & Insights</h2>
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" on:click={() => showSummaryModal = false}>
+                            <i class="fas fa-times"></i>
+                            Close
+                        </button>
+                        <button class="btn btn-danger" on:click={clearSummary}>
+                            <i class="fas fa-trash"></i>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-content">
+                    {#if summaryData}
+                        <div class="summary-section">
+                            <h3>Overview</h3>
+                            <div class="markdown-content">
+                                {@html summaryData.overview.replace(/###\s*(.*?)(?=\n|$)/g, '<h4>$1</h4>')
+                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                    .replace(/\n/g, '<br>')}
+                            </div>
+                        </div>
+
+                        <div class="summary-section">
+                            <h3>Predictions</h3>
+                            <div class="charts-container">
+                                <div class="prediction-chart">
+                                    <canvas id="enrollmentPredictionChart"></canvas>
+                                </div>
+                                <div class="prediction-chart">
+                                    <canvas id="performancePredictionChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="summary-section">
+                            <h3>AI Insights & Recommendations</h3>
+                            <div class="markdown-content">
+                                {@html summaryData.aiInsights.replace(/###\s*(.*?)(?=\n|$)/g, '<h4>$1</h4>')
+                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                    .replace(/\n/g, '<br>')}
+                            </div>
+                        </div>
+                    {:else if isSummarizing}
+                        <div class="loading-container">
+                            <div class="loading-spinner">
+                                <i class="fas fa-chart-bar fa-3x"></i>
+                            </div>
+                            <p>Generating comprehensive analysis...</p>
+                            <div class="loading-dots">
+                                <div class="loading-dot"></div>
+                                <div class="loading-dot"></div>
+                                <div class="loading-dot"></div>
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+        </div>
+    {/if}
 
     <!-- Add/Edit Student Form -->
     <div class="card">
