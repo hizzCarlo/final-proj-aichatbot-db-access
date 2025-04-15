@@ -29,6 +29,10 @@
         {
             query: "Show me academic performance metrics",
             endpoint: "performance"
+        },
+        {
+            query: "What is the GPA distribution across majors?",
+            endpoint: "performance"
         }
     ];
 
@@ -46,39 +50,31 @@
         }];
 
         try {
-            
             const predefinedQuery = suggestedQueries.find(q => 
                 q.query.toLowerCase() === question.toLowerCase()
             );
 
-            if (predefinedQuery) {
-                
-                const response = await fetch('/api/summary', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        question: predefinedQuery.query,
-                        type: predefinedQuery.endpoint
-                    })
-                });
-                const data = await response.json();
-                
-                chatHistory = [...chatHistory, {
-                    type: 'assistant',
-                    content: data.response,
-                    timestamp: new Date()
-                }];
-            } else {
-                const response = await fetch('/api/summary', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question })
-                });
-                const data = await response.json();
-                
-                
+            const response = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    question,
+                    type: predefinedQuery?.endpoint || 'custom'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to get response from server');
+            }
+
+            const data = await response.json();
+            
+            if (data.response) {
+                // Clean up the AI response
                 const cleanResponse = data.response
                     .replace(/<think>[\s\S]*?<\/think>/g, '')
+                    .replace(/\[INST\][\s\S]*?\[\/INST\]/g, '')
+                    .replace(/\[ASSISTANT\][\s\S]*?\[\/ASSISTANT\]/g, '')
                     .trim()
                     .replace(/##\s*(.*?)\s*##/g, '### $1')
                     .replace(/\*\*\s*(.*?)\s*\*\*/g, '**$1**')
@@ -92,8 +88,11 @@
                     content: cleanResponse,
                     timestamp: new Date()
                 }];
+            } else {
+                throw new Error('Invalid response format');
             }
         } catch (error) {
+            console.error('AI Response Error:', error);
             chatHistory = [...chatHistory, {
                 type: 'error',
                 content: 'Sorry, I encountered an error while processing your request. Please try again.',

@@ -2,20 +2,41 @@
     import { onMount } from 'svelte';
     import { fade, slide } from 'svelte/transition';
     import { Chart } from 'chart.js/auto';
+    import StudentGrades from '../../components/StudentGrades.svelte';
 
     interface Student {
         id: number;
         firstName: string;
         lastName: string;
         email: string;
-        grade: number;
         major: string;
         enrollmentDate: string;
         gender: string;
         age: number;
     }
 
+    interface Grade {
+        studentId: number;
+        grade: number;
+    }
+
+    const GPA_SCALE = [
+        { min: 97, max: 100, gpa: 4.0, letter: 'A+' },
+        { min: 93, max: 96, gpa: 4.0, letter: 'A' },
+        { min: 90, max: 92, gpa: 3.7, letter: 'A-' },
+        { min: 87, max: 89, gpa: 3.3, letter: 'B+' },
+        { min: 83, max: 86, gpa: 3.0, letter: 'B' },
+        { min: 80, max: 82, gpa: 2.7, letter: 'B-' },
+        { min: 77, max: 79, gpa: 2.3, letter: 'C+' },
+        { min: 73, max: 76, gpa: 2.0, letter: 'C' },
+        { min: 70, max: 72, gpa: 1.7, letter: 'C-' },
+        { min: 67, max: 69, gpa: 1.3, letter: 'D+' },
+        { min: 65, max: 66, gpa: 1.0, letter: 'D' },
+        { min: 0, max: 64, gpa: 0.0, letter: 'F' }
+    ];
+
     let students: Student[] = [];
+    let grades: Grade[] = [];
     let showChatbot = false;
     let summary = '';
     let editingStudent: Student | null = null;
@@ -29,7 +50,6 @@
         firstName: '',
         lastName: '',
         email: '',
-        grade: '',
         major: '',
         enrollmentDate: '',
         gender: '',
@@ -48,10 +68,44 @@
         aiInsights: string;
     }
 
-    async function loadStudents() {
-        const response = await fetch('/api/students');
-        const data = await response.json();
-        students = data.data;
+    function getGPAInfo(grade: number) {
+        const gpaInfo = GPA_SCALE.find(scale => grade >= scale.min && grade <= scale.max);
+        return gpaInfo || { gpa: 0, letter: 'F' };
+    }
+
+    function calculateStudentGPA(studentId: number): { gpa: number; letter: string } {
+        if (!grades) return { gpa: 0, letter: 'N/A' };
+        
+        const studentGrades = grades.filter(g => g.studentId === studentId);
+        if (studentGrades.length === 0) return { gpa: 0, letter: 'N/A' };
+
+        const totalGPA = studentGrades.reduce((acc, { grade }) => {
+            return acc + getGPAInfo(grade).gpa;
+        }, 0);
+
+        const avgGPA = Number((totalGPA / studentGrades.length).toFixed(2));
+        const letter = GPA_SCALE.find(scale => avgGPA >= scale.gpa)?.letter || 'F';
+
+        return { gpa: avgGPA, letter };
+    }
+
+    async function loadData() {
+        try {
+            const [studentsResponse, gradesResponse] = await Promise.all([
+                fetch('/api/students'),
+                fetch('/api/grades')
+            ]);
+
+            const studentsData = await studentsResponse.json();
+            const gradesData = await gradesResponse.json();
+
+            students = studentsData.data;
+            grades = gradesData.data || [];
+        } catch (error) {
+            console.error('Error loading data:', error);
+            students = [];
+            grades = [];
+        }
     }
 
     async function getSummary() {
@@ -66,7 +120,6 @@
             firstName: student.firstName,
             lastName: student.lastName,
             email: student.email,
-            grade: student.grade.toString(),
             major: student.major,
             enrollmentDate: student.enrollmentDate,
             gender: student.gender,
@@ -84,7 +137,6 @@
             firstName: '',
             lastName: '',
             email: '',
-            grade: '',
             major: '',
             enrollmentDate: '',
             gender: '',
@@ -95,7 +147,6 @@
     async function handleSubmit() {
         const studentData = {
             ...formData,
-            grade: parseInt(formData.grade),
             age: parseInt(formData.age),
             major: formData.major.toUpperCase()
         };
@@ -115,7 +166,7 @@
             });
         }
         
-        await loadStudents();
+        await loadData();
         resetForm();
     }
 
@@ -126,7 +177,7 @@
                 body: JSON.stringify({ id }),
                 headers: { 'Content-Type': 'application/json' }
             });
-            await loadStudents();
+            await loadData();
         }
     }
 
@@ -308,7 +359,7 @@
         });
     }
 
-    onMount(loadStudents);
+    onMount(loadData);
 </script>
 
 <style>
@@ -497,6 +548,26 @@
             grid-template-columns: 1fr;
         }
     }
+
+    .gpa-display {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .gpa-value {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .letter-grade {
+        font-weight: bold;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        background: var(--primary-color);
+        color: white;
+        font-size: 0.875rem;
+    }
 </style>
 
 <div class="container">
@@ -627,19 +698,6 @@
                     />
                 </div>
                 <div class="form-group">
-                    <label for="grade" class="form-label">Grade</label>
-                    <input
-                        id="grade"
-                        bind:value={formData.grade}
-                        type="number"
-                        min="0"
-                        max="100"
-                        placeholder="Enter grade"
-                        class="form-input"
-                        required
-                    />
-                </div>
-                <div class="form-group">
                     <label for="major" class="form-label">Major</label>
                     <input
                         id="major"
@@ -703,6 +761,10 @@
         </div>
     </div>
 
+    <!-- Add the grades component when editing a student -->
+    {#if editingStudent}
+        <StudentGrades studentId={editingStudent.id} />
+    {/if}
 
     <div class="card">
         <div class="card-header">
@@ -712,53 +774,39 @@
             <table class="table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Grade</th>
-                        <th>Major</th>
-                        <th>Gender</th>
-                        <th>Age</th>
-                        <th>Enrollment Date</th>
-                        <th class="text-right">Actions</th>
+                        <th>NAME</th>
+                        <th>EMAIL</th>
+                        <th>MAJOR</th>
+                        <th>GENDER</th>
+                        <th>AGE</th>
+                        <th>GPA</th>
+                        <th>ENROLLMENT DATE</th>
+                        <th>ACTIONS</th>
                     </tr>
                 </thead>
                 <tbody>
                     {#each students as student}
+                        {@const gpaInfo = calculateStudentGPA(student.id)}
                         <tr>
+                            <td>{student.firstName} {student.lastName}</td>
+                            <td>{student.email}</td>
+                            <td>{student.major}</td>
+                            <td>{student.gender}</td>
+                            <td>{student.age}</td>
                             <td>
-                                <div class="text-gray-900">{student.firstName} {student.lastName}</div>
+                                <div class="gpa-display">
+                                    <span class="gpa-value">{gpaInfo.gpa}</span>
+                                    <span class="letter-grade">{gpaInfo.letter}</span>
+                                </div>
                             </td>
+                            <td>{student.enrollmentDate}</td>
                             <td>
-                                <div class="text-gray-500">{student.email}</div>
-                            </td>
-                            <td>
-                                <div class="text-gray-900">{student.grade}</div>
-                            </td>
-                            <td>
-                                <div class="text-gray-900">{student.major}</div>
-                            </td>
-                            <td>
-                                <div class="text-gray-900">{student.gender}</div>
-                            </td>
-                            <td>
-                                <div class="text-gray-900">{student.age}</div>
-                            </td>
-                            <td>
-                                <div class="text-gray-500">{new Date(student.enrollmentDate).toLocaleDateString()}</div>
-                            </td>
-                            <td class="text-right">
-                                <div class="flex justify-end gap-2">
-                                    <button
-                                        on:click={() => startEdit(student)}
-                                        class="btn btn-secondary"
-                                    >
+                                <div class="flex gap-2">
+                                    <button class="btn btn-secondary" on:click={() => startEdit(student)}>
                                         <i class="fas fa-edit"></i>
                                         Edit
                                     </button>
-                                    <button
-                                        on:click={() => deleteStudent(student.id)}
-                                        class="btn btn-danger"
-                                    >
+                                    <button class="btn btn-danger" on:click={() => deleteStudent(student.id)}>
                                         <i class="fas fa-trash-alt"></i>
                                         Delete
                                     </button>
@@ -768,7 +816,7 @@
                     {/each}
                     {#if students.length === 0}
                         <tr>
-                            <td colspan="8" class="text-center text-gray-500">
+                            <td colspan="7" class="text-center text-gray-500">
                                 <div class="flex flex-col items-center mb-4">
                                     <i class="fas fa-users text-3xl mb-2"></i>
                                     <p>No students found</p>

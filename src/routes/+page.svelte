@@ -8,14 +8,39 @@
         firstName: string;
         lastName: string;
         email: string;
-        grade: number;
         major: string;
         enrollmentDate: string;
         gender: string;
         age: number;
     }
 
+    interface Grade {
+        studentId: number;
+        grade: number;
+    }
+
+    interface GPAResult {
+        gpa: number;
+        letter: string;
+    }
+
+    const GPA_SCALE = [
+        { min: 97, max: 100, gpa: 4.0, letter: 'A+' },
+        { min: 93, max: 96, gpa: 4.0, letter: 'A' },
+        { min: 90, max: 92, gpa: 3.7, letter: 'A-' },
+        { min: 87, max: 89, gpa: 3.3, letter: 'B+' },
+        { min: 83, max: 86, gpa: 3.0, letter: 'B' },
+        { min: 80, max: 82, gpa: 2.7, letter: 'B-' },
+        { min: 77, max: 79, gpa: 2.3, letter: 'C+' },
+        { min: 73, max: 76, gpa: 2.0, letter: 'C' },
+        { min: 70, max: 72, gpa: 1.7, letter: 'C-' },
+        { min: 67, max: 69, gpa: 1.3, letter: 'D+' },
+        { min: 65, max: 66, gpa: 1.0, letter: 'D' },
+        { min: 0, max: 64, gpa: 0.0, letter: 'F' }
+    ];
+
     let students: Student[] = [];
+    let grades: Grade[] = [];
     let showChatbot = false;
     let summary = '';
     let formData = {
@@ -31,9 +56,17 @@
     let gradeChart: Chart;
 
     async function loadStudents() {
-        const response = await fetch('/api/students');
-        const data = await response.json();
-        students = data.data;
+        const [studentsResponse, gradesResponse] = await Promise.all([
+            fetch('/api/students'),
+            fetch('/api/grades')
+        ]);
+        
+        const studentsData = await studentsResponse.json();
+        const gradesData = await gradesResponse.json();
+        
+        students = studentsData.data;
+        grades = gradesData.data;
+        
         createCharts();
     }
 
@@ -67,6 +100,27 @@
             headers: { 'Content-Type': 'application/json' }
         });
         await loadStudents();
+    }
+
+    function getGPAInfo(grade: number) {
+        const gpaInfo = GPA_SCALE.find(scale => grade >= scale.min && grade <= scale.max);
+        return gpaInfo || { gpa: 0, letter: 'F' };
+    }
+
+    function calculateStudentGPA(studentId: number): GPAResult {
+        if (!grades) return { gpa: 0, letter: 'N/A' };
+        
+        const studentGrades = grades.filter(g => g.studentId === studentId);
+        if (studentGrades.length === 0) return { gpa: 0, letter: 'N/A' };
+
+        const totalGPA = studentGrades.reduce((acc, { grade }) => {
+            return acc + getGPAInfo(grade).gpa;
+        }, 0);
+
+        const avgGPA = Number((totalGPA / studentGrades.length).toFixed(2));
+        const letter = GPA_SCALE.find(scale => avgGPA >= scale.gpa)?.letter || 'F';
+
+        return { gpa: avgGPA, letter };
     }
 
     function createCharts() {
@@ -159,13 +213,34 @@
             }
         });
 
-        // Grade distribution horizontal bar chart
-        const gradeRanges = {
-            '90-100': students.filter(s => s.grade >= 90).length,
-            '80-89': students.filter(s => s.grade >= 80 && s.grade < 90).length,
-            '70-79': students.filter(s => s.grade >= 70 && s.grade < 80).length,
-            '60-69': students.filter(s => s.grade >= 60 && s.grade < 70).length,
-            'Below 60': students.filter(s => s.grade < 60).length
+        // GPA distribution horizontal bar chart
+        const gpaRanges = {
+            '4.0': students.filter(s => calculateStudentGPA(s.id).gpa === 4.0).length,
+            '3.7-3.9': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 3.7 && gpa < 4.0;
+            }).length,
+            '3.3-3.6': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 3.3 && gpa < 3.7;
+            }).length,
+            '3.0-3.2': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 3.0 && gpa < 3.3;
+            }).length,
+            '2.7-2.9': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 2.7 && gpa < 3.0;
+            }).length,
+            '2.3-2.6': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 2.3 && gpa < 2.7;
+            }).length,
+            '2.0-2.2': students.filter(s => {
+                const gpa = calculateStudentGPA(s.id).gpa;
+                return gpa >= 2.0 && gpa < 2.3;
+            }).length,
+            'Below 2.0': students.filter(s => calculateStudentGPA(s.id).gpa < 2.0).length
         };
 
         const gradeCtx = document.getElementById('gradeChart') as HTMLCanvasElement;
@@ -173,31 +248,33 @@
         gradeChart = new Chart(gradeCtx, {
             type: 'bar',
             data: {
-                labels: Object.keys(gradeRanges),
+                labels: Object.keys(gpaRanges),
                 datasets: [{
                     label: 'Number of Students',
-                    data: Object.values(gradeRanges),
-                    backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color')
+                    data: Object.values(gpaRanges),
+                    backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color'),
+                    borderRadius: 4
                 }]
             },
             options: {
                 indexAxis: 'y',
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     title: {
                         display: true,
-                        text: 'Grade Distribution',
+                        text: 'GPA Distribution',
                         color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary')
                     },
                     legend: {
-                        labels: {
-                            color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary')
-                        }
+                        display: false
                     }
                 },
                 scales: {
                     x: {
+                        beginAtZero: true,
                         ticks: {
+                            stepSize: 1,
                             color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary')
                         },
                         grid: {
@@ -209,13 +286,17 @@
                             color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary')
                         },
                         grid: {
-                            color: getComputedStyle(document.documentElement).getPropertyValue('--border-color')
+                            display: false
                         }
                     }
                 }
             }
         });
     }
+
+    $: averageGPA = students.length > 0 
+        ? Number((students.reduce((acc, s) => acc + calculateStudentGPA(s.id).gpa, 0) / students.length).toFixed(2))
+        : 0;
 
     onMount(() => {
         loadStudents();
@@ -265,12 +346,8 @@
                 <i class="fas fa-chart-line"></i>
             </div>
             <div class="stat-content">
-                <h3>Average Grade</h3>
-                <p class="stat-value">
-                    {students.length > 0 
-                        ? Math.round(students.reduce((acc, s) => acc + s.grade, 0) / students.length) 
-                        : 0}%
-                </p>
+                <h3>Average GPA</h3>
+                <p class="stat-value">{averageGPA}</p>
             </div>
         </div>
 
@@ -311,7 +388,7 @@
    
         <div class="chart-card full-width">
             <div class="chart-header">
-                <h2>Grade Distribution</h2>
+                <h2>GPA Distribution</h2>
             </div>
             <div class="chart-body">
                 <canvas id="gradeChart"></canvas>

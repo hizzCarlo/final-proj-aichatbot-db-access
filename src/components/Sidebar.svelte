@@ -15,6 +15,10 @@
             <i class="fas fa-users"></i>
             Students
         </a>
+        <a href="/subjects" class="nav-link {activePage === 'subjects' ? 'active' : ''}">
+            <i class="fas fa-book"></i>
+            Subjects
+        </a>
         <a href="/settings" class="nav-link {activePage === 'settings' ? 'active' : ''}">
             <i class="fas fa-cog"></i>
             Settings
