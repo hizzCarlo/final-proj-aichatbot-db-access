@@ -94,7 +94,7 @@ async function queryAI(prompt: string): Promise<string> {
 
 export const POST: RequestHandler = async ({ request }) => {
     try {
-        const { question, type } = await request.json();
+    const { question, type } = await request.json();
         const [studentsData, gradesData, subjectsData] = await Promise.all([
             db.select().from(student),
             db.select().from(studentGrade),
@@ -140,8 +140,8 @@ export const POST: RequestHandler = async ({ request }) => {
         if (type && type !== 'custom') {
             let response: string;
 
-            switch (type) {
-                case "summary": {
+        switch (type) {
+            case "summary": {
                     const majorStats = uniqueMajors.map(major => {
                         const studentsInMajor = studentGPAs.filter(s => s.major === major);
                         const avgMajorGPA = studentsInMajor.length > 0
@@ -166,7 +166,7 @@ export const POST: RequestHandler = async ({ request }) => {
   Grades:\n${subjectGrades}`;
                     }).join('\n\n');
 
-                    response = `### Student Data Overview
+                response = `### Student Data Overview
 
 **Total Students**: ${studentsData.length}
 **Gender Distribution**:
@@ -196,10 +196,10 @@ ${majorStats}
 
 ### Detailed Student Information
 ${detailedStudentInfo}`;
-                    break;
-                }
+                break;
+            }
 
-                case "enrollment": {
+            case "enrollment": {
                     // Parse enrollment dates and group by year and semester
                     const enrollmentTrends = studentsData.reduce((acc, student) => {
                         const [year, semester] = student.enrollmentDate.split(' ');
@@ -226,7 +226,7 @@ ${detailedStudentInfo}`;
                         const trendByYear = years.map(year => {
                             const studentsInYear = studentsData.filter(s => 
                                 s.enrollmentDate.startsWith(year) && s.major === major
-                            ).length;
+                ).length;
                             return { year, count: studentsInYear };
                         });
 
@@ -269,10 +269,10 @@ ${majorTrends}
         s.enrollmentDate.startsWith(years[years.length - 1])).length;
     return bGrowth > aGrowth ? b : a;
 })}`;
-                    break;
-                }
+                break;
+            }
 
-                case "performance": {
+            case "performance": {
                     const majorPerformance = uniqueMajors.map(major => {
                         const studentsInMajor = studentGPAs.filter(s => s.major === major);
                         const avgMajorGPA = studentsInMajor.length > 0
@@ -315,15 +315,15 @@ ${majorPerformance}
 * Very Good (3.3-3.6): ${gpaRanges['3.3-3.6']} students
 * Good (3.0-3.2): ${gpaRanges['3.0-3.2']} students
 * Below Expectations: ${gpaRanges['2.7-2.9'] + gpaRanges['2.3-2.6'] + gpaRanges['2.0-2.2'] + gpaRanges['Below 2.0']} students`;
-                    break;
-                }
-
-                default:
-                    return json({ response: "Invalid query type" });
+                break;
             }
 
-            return json({ response });
+            default:
+                return json({ response: "Invalid query type" });
         }
+
+        return json({ response });
+    }
 
         // For custom queries, use the AI model with the database information as context
         const prompt = `You are an AI assistant analyzing student database information. Use ONLY the following data to answer the question:

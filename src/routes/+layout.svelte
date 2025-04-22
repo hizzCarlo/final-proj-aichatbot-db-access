@@ -338,7 +338,7 @@
     }
 
     .message {
-        margin-bottom: 1rem;
+        margin-bottom: 1.5rem;
         opacity: 0;
         animation: fadeIn 0.3s ease forwards;
     }
@@ -347,8 +347,9 @@
         display: flex;
         gap: 0.75rem;
         align-items: flex-start;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
 
     .message.user .message-content {
@@ -373,18 +374,52 @@
     .message-icon {
         font-size: 1.25rem;
         width: 1.5rem;
+        flex-shrink: 0;
     }
 
     .message-text {
         flex: 1;
+        line-height: 1.6;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    .message-text :global(h3) {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 1.5rem 0 0.75rem;
+        color: inherit;
+    }
+
+    .message-text :global(h4) {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 1.25rem 0 0.5rem;
+        color: inherit;
+    }
+
+    .message-text :global(p) {
+        margin: 0.75rem 0;
+    }
+
+    .message-text :global(ul) {
+        margin: 0.75rem 0;
+        padding-left: 1.5rem;
+    }
+
+    .message-text :global(li) {
+        margin: 0.5rem 0;
+    }
+
+    .message-text :global(strong) {
+        font-weight: 600;
+        color: inherit;
     }
 
     .message-timestamp {
         font-size: 0.75rem;
         color: var(--text-secondary);
-        margin: 0.25rem 1rem;
+        margin: 0.5rem 1rem;
     }
 
     .thinking {
@@ -426,7 +461,7 @@
     }
 
     :global(.dark) .message.assistant .message-content {
-        background-color: rgba(255, 255, 255, 0.1);
+        background-color: rgba(255, 255, 255, 0.05);
     }
 
     :global(.dark) .ai-panel-header h3 {
@@ -435,6 +470,11 @@
 
     :global(.dark) .btn-icon {
         color: white;
+    }
+
+    :global(.dark) .message-text :global(h3),
+    :global(.dark) .message-text :global(h4) {
+        color: inherit;
     }
 
     .text-primary-color {
@@ -462,23 +502,6 @@
 
     .suggested-query:hover {
         background-color: var(--hover-color);
-    }
-
-    .message-text :global(h3) {
-        font-size: 1.125rem;
-        font-weight: 600;
-        margin: 1rem 0 0.5rem;
-        color: var(--primary-color);
-    }
-
-    .message-text :global(strong) {
-        font-weight: 600;
-        color: inherit;
-    }
-
-    .message.user .message-text :global(h3),
-    .message.user .message-text :global(strong) {
-        color: white;
     }
 </style>
   

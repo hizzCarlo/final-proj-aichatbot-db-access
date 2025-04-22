@@ -1,28 +1,22 @@
-<!-- StudentGrades.svelte -->
+<!-- StudentSubjectsGrades.svelte -->
 <script lang="ts">
     import { onMount } from 'svelte';
+    import type { Subject } from '$lib/types';
 
     export let studentId: number;
-    
-    interface Subject {
-        id: number;
-        name: string;
-        code: string;
-        description: string | null;
-    }
+    export let isEditing: boolean;
 
-    interface Grade {
-        id: number;
+    interface StudentGrade {
+        id?: number;
+        studentId: number;
+        subjectId: number;
         grade: number;
         semester: string;
-        subjectId: number;
-        subjectName: string;
-        subjectCode: string;
-        createdAt: string;
+        subjectName?: string;
     }
 
     let subjects: Subject[] = [];
-    let grades: Grade[] = [];
+    let studentGrades: StudentGrade[] = [];
     let selectedSubjects: number[] = [];
     let gradeInputs: { [key: number]: number } = {};
     let gradeErrors: { [key: number]: string } = {};
@@ -44,8 +38,10 @@
     ];
 
     onMount(async () => {
-        await loadSubjects();
-        await loadGrades();
+        await Promise.all([
+            loadSubjects(),
+            loadGrades()
+        ]);
     });
 
     async function loadSubjects() {
@@ -57,12 +53,12 @@
     async function loadGrades() {
         const response = await fetch(`/api/grades?studentId=${studentId}`);
         const data = await response.json();
-        grades = data.data;
+        studentGrades = data.data;
         
         // Initialize selected subjects and grade inputs from existing grades
-        selectedSubjects = grades.map(g => g.subjectId);
+        selectedSubjects = studentGrades.map(g => g.subjectId);
         gradeInputs = Object.fromEntries(
-            grades.map(g => [g.subjectId, g.grade])
+            studentGrades.map(g => [g.subjectId, g.grade])
         );
     }
 
@@ -97,7 +93,6 @@
         const input = event.target as HTMLInputElement;
         let grade = Number(input.value);
         
-        // Clamp the value between 0 and 100
         if (grade > 100) {
             grade = 100;
             input.value = '100';
@@ -111,25 +106,17 @@
         }
     }
 
-    function handleKeyPress(event: KeyboardEvent) {
-        const charCode = event.charCode;
-        if (charCode < 48 || charCode > 57) {
-            event.preventDefault();
-        }
-    }
-
     async function saveGrades() {
         // Validate all grades before saving
         const isValid = Object.entries(gradeInputs).every(([subjectId, grade]) => 
             validateGrade(grade, parseInt(subjectId))
         );
 
-        if (!isValid) {
-            return;
-        }
+        if (!isValid) return;
 
-        const promises = Object.entries(gradeInputs).map(([subjectId, grade]) => {
-            const existingGrade = grades.find(g => g.subjectId === parseInt(subjectId));
+        const promises = selectedSubjects.map(subjectId => {
+            const grade = gradeInputs[subjectId];
+            const existingGrade = studentGrades.find(g => g.subjectId === subjectId);
             
             if (existingGrade) {
                 return fetch('/api/grades', {
@@ -145,7 +132,7 @@
                     method: 'POST',
                     body: JSON.stringify({
                         studentId,
-                        subjectId: parseInt(subjectId),
+                        subjectId,
                         grade,
                         semester: currentSemester
                     }),
@@ -158,81 +145,83 @@
         await loadGrades();
     }
 
-    $: gpaInfo = calculateGPA(Object.values(gradeInputs));
+    $: currentGPA = calculateGPA(Object.values(gradeInputs));
 </script>
 
-<div class="grades-panel">
-    <div class="panel-header">
-        <h3>Student Grades</h3>
-        <div class="gpa-display">
-            <span class="gpa-value">GPA: {gpaInfo.gpa}</span>
-            <span class="letter-grade">{gpaInfo.letter}</span>
+{#if isEditing}
+    <div class="subjects-grades-panel">
+        <div class="panel-header">
+            <h3>Subjects & Grades</h3>
+            <div class="gpa-display">
+                <span class="gpa-value">GPA: {currentGPA.gpa}</span>
+                <span class="letter-grade">{currentGPA.letter}</span>
+            </div>
+        </div>
+
+        <div class="subjects-grid">
+            {#each subjects as subject (subject.id)}
+                <div class="subject-card">
+                    <label class="subject-header">
+                        <input
+                            type="checkbox"
+                            bind:group={selectedSubjects}
+                            value={subject.id}
+                        />
+                        <span>{subject.name} ({subject.code})</span>
+                    </label>
+                    
+                    {#if selectedSubjects.includes(subject.id)}
+                        <div class="grade-input">
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={gradeInputs[subject.id] || ''}
+                                on:input={(e) => handleGradeInput(e, subject.id)}
+                                class:error={gradeErrors[subject.id]}
+                                placeholder="Grade (0-100)"
+                            />
+                            {#if gradeErrors[subject.id]}
+                                <div class="error-message">{gradeErrors[subject.id]}</div>
+                            {/if}
+                            {#if gradeInputs[subject.id]}
+                                <div class="grade-info">
+                                    {getGPAInfo(gradeInputs[subject.id]).letter} 
+                                    ({getGPAInfo(gradeInputs[subject.id]).gpa} GPA)
+                                </div>
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
+            {/each}
+        </div>
+
+        <div class="panel-footer">
+            <button 
+                class="btn btn-primary" 
+                on:click={saveGrades}
+                disabled={Object.keys(gradeErrors).length > 0}
+            >
+                Save Grades
+            </button>
         </div>
     </div>
-
-    <div class="subjects-grid">
-        {#each subjects as subject (subject.id)}
-            <div class="subject-card">
-                <label class="subject-header">
-                    <input
-                        type="checkbox"
-                        bind:group={selectedSubjects}
-                        value={subject.id}
-                    />
-                    <span>{subject.name} ({subject.code})</span>
-                </label>
-                
-                {#if selectedSubjects.includes(subject.id)}
-                    <div class="grade-input">
-                        <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={gradeInputs[subject.id] || ''}
-                            on:input={(e) => handleGradeInput(e, subject.id)}
-                            on:keypress={handleKeyPress}
-                            class:error={gradeErrors[subject.id]}
-                            placeholder="Grade (0-100)"
-                        />
-                        {#if gradeErrors[subject.id]}
-                            <div class="error-message">{gradeErrors[subject.id]}</div>
-                        {/if}
-                        {#if gradeInputs[subject.id]}
-                            <div class="grade-info">
-                                {getGPAInfo(gradeInputs[subject.id]).letter} 
-                                ({getGPAInfo(gradeInputs[subject.id]).gpa} GPA)
-                            </div>
-                        {/if}
-                    </div>
-                {/if}
-            </div>
-        {/each}
-    </div>
-
-    <div class="panel-footer">
-        <button 
-            class="btn btn-primary" 
-            on:click={saveGrades}
-            disabled={Object.keys(gradeErrors).length > 0}
-        >
-            Save Grades
-        </button>
-    </div>
-</div>
+{/if}
 
 <style>
-    .grades-panel {
+    .subjects-grades-panel {
+        margin-top: 1.5rem;
+        padding: 1.5rem;
         background: var(--card-background);
         border-radius: 0.5rem;
-        padding: 1.5rem;
-        margin-top: 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
 
     .panel-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 1rem;
+        margin-bottom: 1.5rem;
     }
 
     .gpa-display {
@@ -292,12 +281,6 @@
         color: var(--text-primary);
     }
 
-    :global(.dark) .grade-input input {
-        background: var(--card-background);
-        color: var(--text-primary);
-        border-color: var(--border-color);
-    }
-
     .grade-input input.error {
         border-color: #dc2626;
     }
@@ -311,10 +294,6 @@
     .grade-info {
         margin-top: 0.25rem;
         font-size: 0.875rem;
-        color: var(--text-secondary);
-    }
-
-    :global(.dark) .grade-info {
         color: var(--text-secondary);
     }
 

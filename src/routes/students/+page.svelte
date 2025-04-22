@@ -2,7 +2,9 @@
     import { onMount } from 'svelte';
     import { fade, slide } from 'svelte/transition';
     import { Chart } from 'chart.js/auto';
-    import StudentGrades from '../../components/StudentGrades.svelte';
+    
+    import SummaryModal from '$lib/components/SummaryModal.svelte';
+    import StudentSubjectsGrades from '../../components/StudentSubjectsGrades.svelte';
 
     interface Student {
         id: number;
@@ -37,14 +39,19 @@
 
     let students: Student[] = [];
     let grades: Grade[] = [];
+    let filteredStudents: Student[] = [];
+    let majorFilter = '';
+    let yearFilter = '';
+    let uniqueMajors: string[] = [];
+    let uniqueYears: string[] = [];
     let showChatbot = false;
     let summary = '';
     let editingStudent: Student | null = null;
     let showSummaryModal = false;
     let isSummarizing = false;
     let summaryData: any = null;
-    let predictionChart: Chart | null = null;
-    let performanceChart: Chart | null = null;
+    let enrollmentPredictionChart: Chart | null = null;
+    let performancePredictionChart: Chart | null = null;
     let isInitialLoad = true;
     let formData = {
         firstName: '',
@@ -89,6 +96,21 @@
         return { gpa: avgGPA, letter };
     }
 
+    // Filter functions
+    function updateFilters() {
+        filteredStudents = students.filter(student => {
+            const matchesMajor = !majorFilter || student.major === majorFilter;
+            const enrollmentYear = student.enrollmentDate.split(' ')[0];
+            const matchesYear = !yearFilter || enrollmentYear === yearFilter;
+            return matchesMajor && matchesYear;
+        });
+    }
+
+    function extractUniqueValues() {
+        uniqueMajors = [...new Set(students.map(s => s.major))].sort();
+        uniqueYears = [...new Set(students.map(s => s.enrollmentDate.split(' ')[0]))].sort();
+    }
+
     async function loadData() {
         try {
             const [studentsResponse, gradesResponse] = await Promise.all([
@@ -101,10 +123,14 @@
 
             students = studentsData.data;
             grades = gradesData.data || [];
+            
+            extractUniqueValues();
+            filteredStudents = students; // Initialize with all students
         } catch (error) {
             console.error('Error loading data:', error);
             students = [];
             grades = [];
+            filteredStudents = [];
         }
     }
 
@@ -181,25 +207,84 @@
         }
     }
 
-    // Watch for modal visibility changes
-    $: if (showSummaryModal && summaryData) {
-        // Use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(() => {
-            createPredictionCharts();
+    function calculatePredictions(data: any[]) {
+        // Group students by year
+        const enrollmentsByYear = data.reduce((acc: Record<string, number>, student: any) => {
+            const year = student.enrollmentDate.split(' ')[0];
+            acc[year] = (acc[year] || 0) + 1;
+            return acc;
+        }, {});
+
+        // Convert to arrays for regression
+        const years = Object.keys(enrollmentsByYear).sort();
+        const counts = years.map(year => enrollmentsByYear[year]);
+
+        // Simple linear regression for enrollment prediction
+        const n = years.length;
+        const xVals = years.map((_, i) => i);
+        const yVals = counts;
+        
+        const xMean = xVals.reduce((a, b) => a + b, 0) / n;
+        const yMean = yVals.reduce((a, b) => a + b, 0) / n;
+        
+        const slope = xVals.reduce((acc, x, i) => 
+            acc + (x - xMean) * (yVals[i] - yMean), 0
+        ) / xVals.reduce((acc, x) => acc + Math.pow(x - xMean, 2), 0);
+        
+        const intercept = yMean - slope * xMean;
+
+        // Generate predictions for next 2 years
+        const lastYear = parseInt(years[years.length - 1]);
+        const futureYears = [1, 2].map(i => (lastYear + i).toString());
+        const predictions = futureYears.map((_, i) => {
+            const x = xVals.length + i;
+            return Math.round(slope * x + intercept);
         });
+
+        return {
+            enrollment: {
+                labels: [...years, ...futureYears],
+                datasets: [{
+                    label: 'Historical Enrollment',
+                    data: counts,
+                    borderColor: 'rgb(99, 102, 241)',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Predicted Enrollment',
+                    data: [...Array(counts.length).fill(null), ...predictions],
+                    borderColor: 'rgb(244, 63, 94)',
+                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                    borderDash: [5, 5],
+                    tension: 0.4
+                }]
+            },
+            performance: {
+                labels: years,
+                datasets: [{
+                    label: 'Average GPA',
+                    data: years.map(year => {
+                        const studentsInYear = data.filter((s: any) => s.enrollmentDate.startsWith(year));
+                        const gpas = studentsInYear.map((s: any) => calculateStudentGPA(s.id).gpa);
+                        return gpas.length ? 
+                            Number((gpas.reduce((a: number, b: number) => a + b, 0) / gpas.length).toFixed(2)) : 
+                            null;
+                    }),
+                    borderColor: 'rgb(99, 102, 241)',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    tension: 0.4
+                }]
+            }
+        };
     }
 
     async function generateSummary() {
         if (isSummarizing) return;
         
-        // Show modal immediately with existing data or loading state
         showSummaryModal = true;
-        
-        // If we already have data or are already loading, don't fetch again
-        if (summaryData || isSummarizing) return;
+        if (summaryData && !isSummarizing) return;
         
         isSummarizing = true;
-        isInitialLoad = false;
 
         try {
             // Get predefined summary
@@ -223,143 +308,56 @@
             });
             const insightResult = await insightResponse.json();
 
-            // Generate mock prediction data (in a real app, this would come from a ML model)
-            const predictions = {
-                enrollmentTrend: [65, 72, 78, 82, 88, 92],
-                performanceTrend: [75, 78, 80, 82, 85, 87],
-                labels: ['Current', '+1 Month', '+2 Months', '+3 Months', '+4 Months', '+5 Months']
-            };
+            // Format the responses
+            const formattedSummary = summaryResult.response
+                .replace(/\n\n/g, '\n')
+                .replace(/^#+\s*/gm, '###')
+                .replace(/\*\*/g, '')
+                .trim();
+
+            const formattedInsights = insightResult.response
+                .replace(/\n\n/g, '\n')
+                .replace(/^#+\s*/gm, '###')
+                .replace(/\*\*/g, '')
+                .trim();
+
+            // Calculate predictions based on actual data
+            const charts = calculatePredictions(students);
 
             summaryData = {
-                overview: summaryResult.response,
-                predictions,
-                aiInsights: insightResult.response
+                summary: formattedSummary,
+                insights: formattedInsights,
+                charts
             };
-
         } catch (error) {
             console.error('Error generating summary:', error);
+            summaryData = null;
         } finally {
             isSummarizing = false;
         }
     }
 
-    function clearSummary() {
+    function handleClearSummary() {
         summaryData = null;
-        if (predictionChart) {
-            predictionChart.destroy();
-            predictionChart = null;
-        }
-        if (performanceChart) {
-            performanceChart.destroy();
-            performanceChart = null;
+        generateSummary();
+    }
+
+    // Watch for filter changes
+    $: {
+        if (students.length > 0) {
+            updateFilters();
         }
     }
 
-    function createPredictionCharts() {
-        // Destroy existing charts first
-        if (predictionChart) {
-            predictionChart.destroy();
-            predictionChart = null;
-        }
-        if (performanceChart) {
-            performanceChart.destroy();
-            performanceChart = null;
-        }
-
-        if (!summaryData) return;
-
-        const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color');
-        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-primary');
-        const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color');
-
-        // Enrollment Prediction Chart
-        const enrollmentCtx = document.getElementById('enrollmentPredictionChart') as HTMLCanvasElement;
-        if (!enrollmentCtx) return; // Exit if canvas element isn't ready
-
-        predictionChart = new Chart(enrollmentCtx, {
-            type: 'line',
-            data: {
-                labels: summaryData.predictions.labels,
-                datasets: [{
-                    label: 'Predicted Enrollment',
-                    data: summaryData.predictions.enrollmentTrend,
-                    borderColor: primaryColor,
-                    tension: 0.4,
-                    fill: true,
-                    backgroundColor: `${primaryColor}20`
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Enrollment Trend Prediction',
-                        color: textColor
-                    },
-                    legend: {
-                        labels: { color: textColor }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { color: borderColor },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        grid: { color: borderColor },
-                        ticks: { color: textColor }
-                    }
-                }
-            }
-        });
-
-        // Performance Prediction Chart
-        const performanceCtx = document.getElementById('performancePredictionChart') as HTMLCanvasElement;
-        if (!performanceCtx) return; // Exit if canvas element isn't ready
-
-        performanceChart = new Chart(performanceCtx, {
-            type: 'line',
-            data: {
-                labels: summaryData.predictions.labels,
-                datasets: [{
-                    label: 'Predicted Average Performance',
-                    data: summaryData.predictions.performanceTrend,
-                    borderColor: primaryColor,
-                    tension: 0.4,
-                    fill: true,
-                    backgroundColor: `${primaryColor}20`
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Performance Trend Prediction',
-                        color: textColor
-                    },
-                    legend: {
-                        labels: { color: textColor }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: { color: borderColor },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        grid: { color: borderColor },
-                        ticks: { color: textColor }
-                    }
-                }
-            }
-        });
+    // Watch for filter value changes
+    $: if (majorFilter !== undefined || yearFilter !== undefined) {
+        updateFilters();
     }
 
-    onMount(loadData);
+    onMount(async () => {
+        await loadData();
+        updateFilters();
+    });
 </script>
 
 <style>
@@ -382,6 +380,21 @@
     :global(.dark) .text-3xl {
         color: #ffffff;
     }
+    .page-header {
+        margin-bottom: 2rem;
+    }
+
+    .page-header h1 {
+        font-size: 2rem;
+        font-weight: 600;
+        color: var(--primary-color);
+        margin-bottom: 0.5rem;
+    }
+
+    .page-header p {
+        color: var(--text-secondary);
+    }
+
     .student-header h1 {
         font-size: 2rem;
         font-weight: 600;
@@ -568,98 +581,282 @@
         color: white;
         font-size: 0.875rem;
     }
+
+    .filters-container {
+        margin-bottom: 1.5rem;
+    }
+
+    .flex {
+        display: flex;
+    }
+
+    .flex-1 {
+        flex: 1;
+    }
+
+    .gap-4 {
+        gap: 1rem;
+    }
+
+    .mb-6 {
+        margin-bottom: 1.5rem;
+    }
+
+    .modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 1200px;
+        max-height: 90vh;
+        background: var(--card-background);
+        border-radius: 0.5rem;
+        z-index: 50;
+        overflow: hidden;
+    }
+
+    .modal-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+        overflow-y: auto;
+    }
+
+    .chart-section {
+        background: var(--background-color);
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+    }
+
+    .loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2rem;
+    }
+
+    .loading i {
+        font-size: 2rem;
+        color: var(--primary-color);
+    }
+
+    .markdown-content {
+        line-height: 1.6;
+    }
+
+    .markdown-content :global(h3) {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 1.5rem 0 1rem;
+    }
+
+    .markdown-content :global(ul) {
+        list-style-type: disc;
+        padding-left: 1.5rem;
+        margin: 1rem 0;
+    }
+
+    .markdown-content :global(p) {
+        margin: 1rem 0;
+    }
+
+    .modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .modal-container {
+        background-color: var(--card-background);
+        border-radius: 1rem;
+        width: 90%;
+        max-width: 1200px;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .modal-header h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+    }
+
+    .close-button {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.5rem;
+        transition: background-color 0.2s;
+    }
+
+    .close-button:hover {
+        background-color: var(--hover-color);
+    }
+
+    .modal-content {
+        padding: 1.5rem;
+        overflow-y: auto;
+        max-height: calc(90vh - 4rem);
+    }
+
+    .summary-sections {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .section {
+        background-color: var(--background-color);
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+    }
+
+    .section h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--primary-color);
+        margin-bottom: 1rem;
+    }
+
+    .overview-content {
+        line-height: 1.6;
+    }
+
+    .section-content {
+        margin-bottom: 1rem;
+    }
+
+    .section-content:last-child {
+        margin-bottom: 0;
+    }
+
+    ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+
+    li {
+        position: relative;
+        padding-left: 1.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    li::before {
+        content: "•";
+        position: absolute;
+        left: 0;
+        color: var(--primary-color);
+    }
+
+    .chart-container {
+        width: 100%;
+        height: 300px;
+        margin-top: 1rem;
+        background-color: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .loading-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2rem;
+        color: var(--text-secondary);
+    }
+
+    .loading-state i {
+        font-size: 2rem;
+    }
+
+    .no-data {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2rem;
+        color: var(--text-secondary);
+    }
+
+    .no-data i {
+        font-size: 2rem;
+    }
+
+    .insights-content {
+        line-height: 1.6;
+        color: var(--text-primary);
+    }
+
+    :global(.dark) .section {
+        background-color: var(--card-background);
+    }
+
+    :global(.dark) .chart-container {
+        background-color: var(--card-background);
+    }
 </style>
 
 <div class="container">
-    <div class="flex justify-between items-center mb-6">
-        <header class="student-header">
-            <h1>Student Management</h1>
-        </header>
-        <button 
-            class="btn btn-primary {isSummarizing ? 'loading' : ''}"
-            on:click={generateSummary}
-            disabled={isSummarizing}
-        >
-            <i class="fas fa-chart-bar"></i>
-            Summarize Data
-            {#if isSummarizing}
-                <div class="loading-dots">
-                    <div class="loading-dot"></div>
-                    <div class="loading-dot"></div>
-                    <div class="loading-dot"></div>
-                </div>
-            {/if}
-        </button>
-    </div>
-
-    <!-- Summary Modal -->
-    {#if showSummaryModal}
-        <div class="modal-overlay" transition:fade>
-            <div class="modal-container" transition:slide>
-                <div class="modal-header">
-                    <h2>Data Analysis & Insights</h2>
-                    <div class="modal-actions">
-                        <button class="btn btn-secondary" on:click={() => showSummaryModal = false}>
-                            <i class="fas fa-times"></i>
-                            Close
-                        </button>
-                        <button class="btn btn-danger" on:click={clearSummary}>
-                            <i class="fas fa-trash"></i>
-                            Clear
-                        </button>
-                    </div>
-                </div>
-                <div class="modal-content">
-                    {#if summaryData}
-                        <div class="summary-section">
-                            <h3>Overview</h3>
-                            <div class="markdown-content">
-                                {@html summaryData.overview.replace(/###\s*(.*?)(?=\n|$)/g, '<h4>$1</h4>')
-                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                    .replace(/\n/g, '<br>')}
-                            </div>
-                        </div>
-
-                        <div class="summary-section">
-                            <h3>Predictions</h3>
-                            <div class="charts-container">
-                                <div class="prediction-chart">
-                                    <canvas id="enrollmentPredictionChart"></canvas>
-                                </div>
-                                <div class="prediction-chart">
-                                    <canvas id="performancePredictionChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="summary-section">
-                            <h3>AI Insights & Recommendations</h3>
-                            <div class="markdown-content">
-                                {@html summaryData.aiInsights.replace(/###\s*(.*?)(?=\n|$)/g, '<h4>$1</h4>')
-                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                    .replace(/\n/g, '<br>')}
-                            </div>
-                        </div>
-                    {:else if isSummarizing}
-                        <div class="loading-container">
-                            <div class="loading-spinner">
-                                <i class="fas fa-chart-bar fa-3x"></i>
-                            </div>
-                            <p>Generating comprehensive analysis...</p>
-                            <div class="loading-dots">
-                                <div class="loading-dot"></div>
-                                <div class="loading-dot"></div>
-                                <div class="loading-dot"></div>
-                            </div>
-                        </div>
-                    {/if}
-                </div>
-            </div>
-        </div>
-    {/if}
+    <header class="page-header">
+        <h1>Student Management</h1>
+        <p>Add and manage students</p>
+    </header>
+   
 
     <!-- Add/Edit Student Form -->
-    <div class="card">
+    <div class="card mb-6">
         <div class="card-header">
             <h2 class="text-xl font-bold">{editingStudent ? 'Edit Student' : 'Add New Student'}</h2>
         </div>
@@ -761,14 +958,70 @@
         </div>
     </div>
 
-    <!-- Add the grades component when editing a student -->
     {#if editingStudent}
-        <StudentGrades studentId={editingStudent.id} />
+        <div class="card mb-6">
+            <div class="card-header">
+                <h2 class="text-xl font-bold">Subjects & Grades</h2>
+            </div>
+            <div class="card-body">
+                <StudentSubjectsGrades 
+                    studentId={editingStudent.id} 
+                    isEditing={true}
+                />
+            </div>
+        </div>
     {/if}
 
+    <!-- Filters -->
+    <div class="filters-container card mb-6">
+        <div class="card-header">
+            <h2 class="text-xl font-bold">Filters</h2>
+        </div>
+        <div class="card-body">
+            <div class="flex gap-4">
+                <div class="form-group flex-1">
+                    <label for="majorFilter" class="form-label">Major</label>
+                    <select
+                        id="majorFilter"
+                        bind:value={majorFilter}
+                        class="form-input"
+                    >
+                        <option value="">All Majors</option>
+                        {#each uniqueMajors as major}
+                            <option value={major}>{major}</option>
+                        {/each}
+                    </select>
+                </div>
+                <div class="form-group flex-1">
+                    <label for="yearFilter" class="form-label">Enrollment Year</label>
+                    <select
+                        id="yearFilter"
+                        bind:value={yearFilter}
+                        class="form-input"
+                    >
+                        <option value="">All Years</option>
+                        {#each uniqueYears as year}
+                            <option value={year}>{year}</option>
+                        {/each}
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student List -->
     <div class="card">
         <div class="card-header">
-            <h2 class="text-xl font-bold">Student List</h2>
+            <div class="flex justify-between items-center">
+                <h2 class="text-xl font-bold">Student List</h2>
+                <div class="flex gap-4 items-center">
+                    <p class="text-sm text-gray-500">Showing {filteredStudents.length} students</p>
+                    <button class="btn btn-primary" on:click={generateSummary}>
+                        <i class="fas fa-chart-line mr-2"></i>
+                        View Summary
+                    </button>
+                </div>
+            </div>
         </div>
         <div class="table-container">
             <table class="table">
@@ -785,7 +1038,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {#each students as student}
+                    {#each filteredStudents as student}
                         {@const gpaInfo = calculateStudentGPA(student.id)}
                         <tr>
                             <td>{student.firstName} {student.lastName}</td>
@@ -814,7 +1067,7 @@
                             </td>
                         </tr>
                     {/each}
-                    {#if students.length === 0}
+                    {#if filteredStudents.length === 0}
                         <tr>
                             <td colspan="7" class="text-center text-gray-500">
                                 <div class="flex flex-col items-center mb-4">
@@ -828,4 +1081,12 @@
             </table>
         </div>
     </div>
-</div> 
+</div>
+
+<SummaryModal 
+    show={showSummaryModal}
+    summaryData={summaryData}
+    isLoading={isSummarizing}
+    on:close={() => showSummaryModal = false}
+    on:clear={handleClearSummary}
+/> 
