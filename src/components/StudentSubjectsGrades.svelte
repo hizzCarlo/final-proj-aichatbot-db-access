@@ -114,6 +114,23 @@
 
         if (!isValid) return;
 
+        // Get subjects that were unchecked (removed)
+        const removedSubjects = studentGrades
+            .filter(grade => !selectedSubjects.includes(grade.subjectId))
+            .map(grade => grade.id);
+
+        // Delete removed subjects
+        if (removedSubjects.length > 0) {
+            await Promise.all(removedSubjects.map(gradeId => 
+                fetch('/api/grades', {
+                    method: 'DELETE',
+                    body: JSON.stringify({ id: gradeId }),
+                    headers: { 'Content-Type': 'application/json' }
+                })
+            ));
+        }
+
+        // Update or add new grades
         const promises = selectedSubjects.map(subjectId => {
             const grade = gradeInputs[subjectId];
             const existingGrade = studentGrades.find(g => g.subjectId === subjectId);

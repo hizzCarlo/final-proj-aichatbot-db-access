@@ -2,7 +2,7 @@ import { db } from "$lib/server/db";
 import { studentGrade, subject } from "$lib/server/db/schema";
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from './$types';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 export const GET: RequestHandler = async ({ url }) => {
     const studentId = url.searchParams.get('studentId');
@@ -52,13 +52,8 @@ export const PUT: RequestHandler = async ({ request }) => {
 };
 
 export const DELETE: RequestHandler = async ({ request }) => {
-    const { studentId, subjectId } = await request.json();
+    const { id } = await request.json();
     await db.delete(studentGrade)
-        .where(
-            and(
-                eq(studentGrade.studentId, studentId),
-                eq(studentGrade.subjectId, subjectId)
-            )
-        );
+        .where(eq(studentGrade.id, id));
     return json({ success: true });
 }; 

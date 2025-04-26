@@ -326,7 +326,7 @@ ${majorPerformance}
     }
 
         // For custom queries, use the AI model with the database information as context
-        const prompt = `You are an AI assistant analyzing student database information. Use ONLY the following data to answer the question:
+        const prompt = `You are an AI assistant analyzing student database information. Use the following comprehensive data to answer the question:
 
 Database Statistics:
 - Total Students: ${studentsData.length}
@@ -336,11 +336,37 @@ Database Statistics:
 - Majors: ${uniqueMajors.join(', ')}
 - Age Range: ${minAge}-${maxAge} years
 - Average Age: ${avgAge}
-- GPA Distribution: ${JSON.stringify(gpaRanges, null, 2)}
+
+Detailed Student Information:
+${studentsData.map(student => {
+    const studentGrades = gradesData.filter(g => g.studentId === student.id);
+    const gpaInfo = calculateStudentGPA(studentGrades);
+    const subjectGrades = studentGrades.map(grade => {
+        const subjectInfo = subjectsData.find(s => s.id === grade.subjectId);
+        return `${subjectInfo?.name}: ${grade.grade}`;
+    }).join(', ');
+    
+    return `* ${student.firstName} ${student.lastName}:
+  - Email: ${student.email}
+  - Age: ${student.age}
+  - Major: ${student.major}
+  - Gender: ${student.gender}
+  - Enrollment Date: ${student.enrollmentDate}
+  - GPA: ${gpaInfo.gpa} (${gpaInfo.letter})
+  - Subject Grades: ${subjectGrades}`;
+}).join('\n')}
+
+Subject Information:
+${subjectsData.map(subject => 
+    `* ${subject.name} (${subject.code})${subject.description ? ': ' + subject.description : ''}`
+).join('\n')}
+
+GPA Distribution:
+${Object.entries(gpaRanges).map(([range, count]) => `* ${range}: ${count} students`).join('\n')}
 
 Question: ${question}
 
-Please provide a specific, accurate answer based ONLY on the above data. Format your response in markdown with appropriate headers and bullet points. Do not make assumptions beyond what is shown in the data.`;
+Please provide a specific, accurate answer based on the above data. Format your response in markdown with appropriate headers and bullet points. You can now provide detailed information about specific students, their grades, and subjects.`;
 
         const response = await queryAI(prompt);
         if (response) {
